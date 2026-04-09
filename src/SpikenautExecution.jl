@@ -21,18 +21,7 @@ LIF neurons → SNN signal → ZMQ bridge → Kelly sizing → dydx v4 → Order
 
 ## Provenance
 
-Extracted from Eagle-Lander, the author's own private neuromorphic GPU supervisor
-repository (closed-source). Source files:
-
-- `execution/` (Rust) — confidence gating, signal structs, ZMQ publish
-- `execution/signal_broadcaster.jl` — original Julia ZMQ SUB listener and dispatch loop
-
-The execution pipeline received live ZMQ signals from a Rust SNN nervous system and
-placed orders on dYdX v4 perpetuals in production before being open-sourced as a
-standalone Julia package.
-
-The dYdX v4 client (decentralized perpetuals, no API key required) is the unique angle:
-no other Julia execution library targets a non-custodial decentralized exchange.
+Developed as a standalone async execution pipeline for custom neuromorphic SNN models and high-frequency ML integrations.
 
 ## References
 
@@ -60,7 +49,6 @@ start!(engine, zmq_endpoint="tcp://localhost:5555")
 """
 module SpikenautExecution
 
-using Dates
 using JSON
 
 export TradeSignal, TradeSide, ExecutionEngine, ExecutionDecision
@@ -125,9 +113,10 @@ end
     latency_ns(signal) -> Int64
 
 End-to-end latency from signal creation to now (nanoseconds).
+Uses Unix epoch time to match Rust `timestamp_nanos` semantics.
 """
 function latency_ns(s::TradeSignal)::Int64
-    now_ns = Int64(Dates.value(Dates.now()) * 1_000_000)  # ms → ns approximation
+    now_ns = round(Int64, time() * 1_000_000_000)
     return max(0, now_ns - s.timestamp_ns)
 end
 
