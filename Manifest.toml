@@ -1,8 +1,8 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.12.5"
+julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "62c8b8e1f0eea0983ebce07b2a4d9b2a76fe6b99"
+project_hash = "5074862fbad4b0bf81a4c2d908c5be052a2fbecc"
 
 [[deps.Artifacts]]
 uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
@@ -33,6 +33,12 @@ version = "2.5.1"
 deps = ["Printf"]
 uuid = "ade2ca70-3891-5945-98fb-dc099432e06a"
 version = "1.11.0"
+
+[[deps.DendriteTrader]]
+deps = ["HTTP", "JSON", "ZMQ"]
+path = "."
+uuid = "b2c3d4e5-f6a7-8901-bcde-f01234567892"
+version = "0.1.0"
 
 [[deps.ExceptionUnwrapping]]
 deps = ["Test"]
@@ -170,12 +176,6 @@ version = "1.2.0"
 [[deps.Sockets]]
 uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
 version = "1.11.0"
-
-[[deps.SpikenautExecution]]
-deps = ["Dates", "HTTP", "JSON", "ZMQ"]
-path = "."
-uuid = "b2c3d4e5-f6a7-8901-bcde-f01234567892"
-version = "0.1.0"
 
 [[deps.StyledStrings]]
 uuid = "f489334b-da3d-4c2e-b8f0-e476e12c162b"

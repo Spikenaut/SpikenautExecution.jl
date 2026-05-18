@@ -1,13 +1,13 @@
 """
-    SpikenautExecution
+    DendriteTrader
 
-Async trade signal pipeline: ZMQ SUB → confidence gating → Kelly sizing → dYdX v4 REST execution.
+Julia strategy, diagnostics, paper-trading, and control-plane layer for neural trading systems.
 
-Bridges Julia SNN strategy output to live decentralized exchange execution with:
+Bridges Julia SNN strategy output to trading decisions with:
 - ZMQ SUB socket for JSON trade signals from Rust nervous system
 - Nanosecond latency tracking (signal creation → execution)
 - Confidence gate (only executes signals above threshold)
-- Kelly position sizing via SpikenautKelly
+- Integrated Kelly/fractional-Kelly position sizing
 - dYdX v4 decentralized perpetuals REST client (no API key required)
 
 ## Architecture
@@ -21,7 +21,8 @@ LIF neurons → SNN signal → ZMQ bridge → Kelly sizing → dydx v4 → Order
 
 ## Provenance
 
-Developed as a standalone async execution pipeline for custom neuromorphic SNN models and high-frequency ML integrations.
+Developed as a Julia control-plane and paper-trading package for custom neuromorphic SNN models and ML trading integrations.
+Latency-critical execution loops remain the responsibility of adjacent Rust services.
 
 ## References
 
@@ -41,20 +42,26 @@ Developed as a standalone async execution pipeline for custom neuromorphic SNN m
 ## Usage
 
 ```julia
-using SpikenautExecution
+using DendriteTrader
 
 engine = ExecutionEngine(confidence_threshold=0.85)
 start!(engine, zmq_endpoint="tcp://localhost:5555")
 ```
 """
-module SpikenautExecution
+module DendriteTrader
 
 using JSON
+using HTTP
 
-export TradeSignal, TradeSide, ExecutionEngine, ExecutionDecision
+export TradeSignal, TradeSide, Buy, Sell, Neutral, ExecutionEngine, ExecutionDecision
 export execute_signal!, latency_ns, passes_gate
 export DydxClient, DydxPrice, get_price, mid_price, spread_bps
-export start!
+export start!, fill_rate
+export kelly_fraction, from_confidence, half_kelly
+export RiskTier, Aggressive, Moderate, Conservative, Minimal, risk_tier
+export PositionSize, size_position
+
+include("sizing/kelly.jl")
 
 # ── Trade Signal ─────────────────────────────────────────────────────────────
 
@@ -75,7 +82,7 @@ end
 Deserialized trade signal from Rust nervous system via ZMQ.
 
 # Fields
-- `ticker`:       asset symbol (e.g. "BTC-USD", "DNX-USDT")
+- `ticker`:       configurable venue symbol
 - `side`:         Buy / Sell / Neutral
 - `price`:        expected execution price (USD)
 - `quantity`:     units to trade (Kelly-sized by Rust, override in Julia)
@@ -200,14 +207,13 @@ function execute_signal!(
         return ExecutionDecision(signal, false, "neutral signal", 0.0, 0.0, lat)
     end
 
-    # Kelly position sizing
-    p = Float64(signal.confidence)
-    b = engine.payoff_ratio
-    q = 1.0 - p
-    full_k = (p * b - q) / b
-    k = clamp(full_k * 0.5, 0.0, 1.0)  # half-Kelly
-
-    units = min((k * account_balance) / max(signal.price, 1e-9), engine.max_position_size)
+    position = size_position(
+        confidence = Float64(signal.confidence),
+        price = signal.price,
+        account_balance = account_balance,
+        payoff_ratio = engine.payoff_ratio,
+    )
+    units = min(position.units, engine.max_position_size)
 
     # Update position book
     current = get(engine.positions, signal.ticker, 0.0)
@@ -218,7 +224,7 @@ function execute_signal!(
     end
 
     engine.executed_signals += 1
-    return ExecutionDecision(signal, true, "executed", k, units, lat)
+    return ExecutionDecision(signal, true, "executed", position.kelly_fraction, units, lat)
 end
 
 """
@@ -260,7 +266,7 @@ spread_bps(p::DydxPrice) = max(p.best_ask - p.best_bid, 0.0) / max(p.best_ask, 1
 """
     DydxClient
 
-REST client for dYdX v4 perpetuals (no API key required for read-only).
+REST client for dYdX v4 perpetuals (no API key required for read-only market data).
 """
 struct DydxClient
     base_url::String
@@ -273,7 +279,7 @@ DydxClient(; base_url::String = "https://indexer.dydx.trade/v4",
 """
     get_price(client, ticker) -> Union{DydxPrice, Nothing}
 
-Fetch current oracle price and order book top for `ticker` (e.g. "BTC-USD").
+Fetch current oracle price and order book top for `ticker`.
 Returns `nothing` on network error.
 """
 function get_price(client::DydxClient, ticker::String)::Union{DydxPrice, Nothing}
